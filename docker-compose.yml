@@ -1,0 +1,57 @@
+name: betafleet-jobfile
+
+# Ports default to 5434 / 8092 / 5181 so this stack runs alongside BetaWMS (5433/8091/5180)
+# and the Betatech TMS demo (5432/8080/5173) without clashing.
+services:
+  postgres:
+    image: postgres:19-alpine
+    environment:
+      POSTGRES_DB: betafleet
+      POSTGRES_USER: betafleet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-betafleet}
+      TZ: Africa/Dar_es_Salaam
+    ports:
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_HOST_PORT:-5434}:5432"
+    volumes:
+      - betafleet_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U betafleet -d betafleet"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=betafleet;Username=betafleet;Password=${POSTGRES_PASSWORD:-betafleet}"
+      # Leave SAP_BRIDGE_URL empty to run in demo mode (invoices are marked posted with a fake A/R number).
+      Sap__BridgeUrl: ${SAP_BRIDGE_URL:-}
+      Sap__DemoMode: ${SAP_DEMO_MODE:-true}
+      Seed__SampleData: ${SEED_SAMPLE_DATA:-true}
+      # Local dev uses the placeholders below. Production sets real values in .env (see .env.example).
+      Jwt__Key: ${JWT_KEY:-betafleet-local-dev-signing-key-change-me-before-any-real-use-2026}
+      # One demo account per role is created on an empty database with this password. Set it empty in production.
+      Seed__DemoPassword: ${DEMO_PASSWORD-BetaFleet-demo-2026}
+      # Used only when there are no accounts and no demo password: creates "admin", who must change it at first sign-in.
+      Auth__AdminPassword: ${ADMIN_PASSWORD:-}
+      Cors__AllowedOrigins__0: ${CORS_ORIGIN:-http://localhost:5181}
+    ports:
+      - "${API_BIND:-127.0.0.1}:${API_HOST_PORT:-8092}:8080"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_HOST_PORT:-5181}:80"
+    restart: unless-stopped
+
+volumes:
+  betafleet_pgdata:
